@@ -1,4 +1,4 @@
-# Copyright (C) 2013 Nippon Telegraph and Telephone Corporation.
+﻿# Copyright (C) 2013 Nippon Telegraph and Telephone Corporation.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,6 +12,22 @@
 # implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+#
+# Copyright 2015 FUJITSU LIMITED. 
+# 
+# Licensed under the Apache License, Version 2.0 (the "License"); 
+# you may not use this file except in compliance with the License. 
+# You may obtain a copy of the License at 
+# 
+#   http://www.apache.org/licenses/LICENSE-2.0 
+# 
+# Unless required by applicable law or agreed to in writing, software 
+# distributed under the License is distributed on an "AS IS" BASIS, 
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. 
+# See the License for the specific language governing permissions and 
+# limitations under the License. 
+# 
 
 import base64
 import struct
@@ -50,7 +66,11 @@ def to_action(dp, dic):
     result = None
     action_type = dic.get('type')
     if action_type == 'OUTPUT':
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
         out_port = int(dic.get('port', ofp.OFPP_ANY))
+#        out_port = int(dic.get('value'))
+# -------------------------- Fujitsu code end -------------------------------
         max_len = int(dic.get('max_len', ofp.OFPCML_MAX))
         result = parser.OFPActionOutput(out_port, max_len)
     elif action_type == 'COPY_TTL_OUT':
@@ -87,7 +107,13 @@ def to_action(dp, dic):
     elif action_type == 'SET_FIELD':
         field = dic.get('field')
         value = dic.get('value')
-        result = parser.OFPActionSetField(**{field: value})
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+#        result = parser.OFPActionSetField(**{field:value})
+        field_dic = dict(zip(field,value))
+        match = to_match(dp,field_dic)        
+        result = parser.OFPActionSetField(match)
+# -------------------------- Fujitsu code end -------------------------------
     elif action_type == 'PUSH_PBB':
         ethertype = int(dic.get('ethertype'))
         result = parser.OFPActionPushPbb(ethertype)
@@ -128,8 +154,14 @@ def to_actions(dp, acts):
             else:
                 LOG.debug('Unknown action type: %s' % action_type)
 
-    inst.append(parser.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS,
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+    inst.append(parser.OFPInstructionActions(ofp.OFPIT_WRITE_ACTIONS,
                                              actions))
+#    inst.append(parser.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS,
+#                                             actions))
+# -------------------------- Fujitsu code end -------------------------------
+
     return inst
 
 
@@ -137,7 +169,11 @@ def action_to_str(act):
     action_type = act.cls_action_type
 
     if action_type == ofproto_v1_3.OFPAT_OUTPUT:
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
         buf = 'OUTPUT:' + str(act.port)
+#        buf = '{\'type\': \'OUTPUT\', \'field\': \'port\', \'value\':' + str(act.port) + '}'
+# -------------------------- Fujitsu code end -------------------------------
     elif action_type == ofproto_v1_3.OFPAT_COPY_TTL_OUT:
         buf = 'COPY_TTL_OUT'
     elif action_type == ofproto_v1_3.OFPAT_COPY_TTL_IN:
@@ -163,7 +199,36 @@ def action_to_str(act):
     elif action_type == ofproto_v1_3.OFPAT_DEC_NW_TTL:
         buf = 'DEC_NW_TTL'
     elif action_type == ofproto_v1_3.OFPAT_SET_FIELD:
-        buf = 'SET_FIELD: {%s:%s}' % (act.key, act.value)
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+#        buf = 'SET_FIELD: {%s:%s}' % (act.key, act.value)
+        if isinstance(act.field,ofproto_v1_3_parser.MTOduSigid):
+            key_list = act.field.value.keys()
+            val_list = act.field.value.values()
+
+            field = None
+            for k in key_list:
+                if field == None :
+                    field = '\'field\':[' + '\'' + str(k) + '\''
+                else:
+                    field = field + ',' + '\'' + str(k) + '\''
+            field += ']'
+
+            value = None
+            for v in val_list:
+                if value == None :
+                    value = '\'value\':[' + '\'' + str(v) + '\''
+                else:
+                    value = value + ',' + '\'' + str(v) + '\''
+            value += ']'
+
+            buf = '{\'type\': \'SET_FIELD\','
+            buf = buf + field + value + '}'
+
+        else:
+            buf = '{\'type\': \'SET_FIELD\', \'field\':%s' % act.key
+            buf = buf + '\'value\': %s' % act.value
+# -------------------------- Fujitsu code end -------------------------------
     elif action_type == ofproto_v1_3.OFPAT_PUSH_PBB:
         buf = 'PUSH_PBB:' + str(act.ethertype)
     elif action_type == ofproto_v1_3.OFPAT_POP_PBB:
@@ -256,7 +321,15 @@ def to_match(dp, attrs):
                'mpls_bos': int,
                'pbb_isid': int,
                'tunnel_id': int,
-               'ipv6_exthdr': int}
+               'ipv6_exthdr': int,
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+               'odu_sigtype': str,
+               'tsmap': str,
+               'tpn': int,
+               'tslen':int
+# -------------------------- Fujitsu code end -------------------------------
+               }
 
     match_append = {'in_port': match.set_in_port,
                     'dl_src': match.set_dl_src,
@@ -305,7 +378,16 @@ def to_match(dp, attrs):
                     'mpls_bos': match.set_mpls_bos,
                     'pbb_isid': match.set_pbb_isid,
                     'tunnel_id': match.set_tunnel_id,
-                    'ipv6_exthdr': match.set_ipv6_exthdr}
+                    'ipv6_exthdr': match.set_ipv6_exthdr,
+                    'mpls_label': match.set_mpls_label,
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+                    'odu_sigtype': match.set_odu_type,
+                    'tsmap': match.set_ts,
+                    'tpn': match.set_tpn,
+                    'tslen': match.set_tslen
+# -------------------------- Fujitsu code end -------------------------------
+                    }
 
     if attrs.get('dl_type') == ether.ETH_TYPE_ARP or \
             attrs.get('eth_type') == ether.ETH_TYPE_ARP:
@@ -456,11 +538,27 @@ def match_to_str(ofmatch):
             ofproto_v1_3.OXM_OF_IPV6_ND_TLL: 'ipv6_nd_tll',
             ofproto_v1_3.OXM_OF_PBB_ISID: 'pbb_isid',
             ofproto_v1_3.OXM_OF_TUNNEL_ID: 'tunnel_id',
-            ofproto_v1_3.OXM_OF_IPV6_EXTHDR: 'ipv6_exthdr'}
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+#            ofproto_v1_3.OXM_OF_IPV6_EXTHDR: 'ipv6_exthdr'}
+            ofproto_v1_3.OXM_OF_IPV6_EXTHDR: 'ipv6_exthdr',
+            ofproto_v1_3.OXM_OF_ODU_SIGTYPE: 'odu_sigtype',
+            ofproto_v1_3.OXM_OF_ODU_SIGID: 'odu_sigid'}
+
+    keys2 = {ofproto_v1_3.OXM_OF_ODU_SIGID & 0xFFFFFF00: 'odu_sigid'}
+# -------------------------- Fujitsu code end -------------------------------
 
     match = {}
     for match_field in ofmatch.fields:
-        key = keys[match_field.header]
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+#        key = keys[match_field.header]
+        try:
+            key = keys[match_field.header]
+        except:
+            key = keys2[match_field.header & 0xFFFFFF00]
+# -------------------------- Fujitsu code end -------------------------------
+        
         if key == 'dl_src' or key == 'dl_dst' or key == 'arp_sha' or \
                 key == 'arp_tha' or key == 'ipv6_nd_tll' or \
                 key == 'ipv6_nd_sll':
@@ -576,18 +674,41 @@ def get_queue_stats(dp, waiters):
     return desc
 
 
-def get_flow_stats(dp, waiters):
-    table_id = dp.ofproto.OFPTT_ALL
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+# add match parameter
+#def get_flow_stats(dp, waiters):
+def get_flow_stats(dp, waiters, match = None):
+#    table_id = dp.ofproto.OFPTT_ALL
+    table_id = 0
+# -------------------------- Fujitsu code end -------------------------------
     flags = 0
     out_port = dp.ofproto.OFPP_ANY
     out_group = dp.ofproto.OFPG_ANY
     cookie = 0
     cookie_mask = 0
-    match = dp.ofproto_parser.OFPMatch()
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+#    match = dp.ofproto_parser.OFPMatch()
+    if match == None :
+        ofp_match = dp.ofproto_parser.OFPMatch()
+    else :
+        try:
+            sigid_dic = match.get('odu_sigid')
+            del match['odu_sigid']
+            match.update(sigid_dic)
+        except:
+            pass
+        ofp_match = to_match(dp, match)
+# -------------------------- Fujitsu code end -------------------------------
 
     stats = dp.ofproto_parser.OFPFlowStatsRequest(
         dp, flags, table_id, out_port, out_group, cookie, cookie_mask,
-        match)
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+#        match)
+        ofp_match)
+# -------------------------- Fujitsu code end -------------------------------
 
     msgs = []
     send_stats_request(dp, stats, waiters, msgs)
@@ -852,6 +973,22 @@ def get_group_desc(dp, waiters):
     descs = {str(dp.id): descs}
     return descs
 
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+# send GET CONFIG REQUEST and receive GET_CONFIG_REPLY
+def get_config(dp, waiters):
+
+    stats = dp.ofproto_parser.OFPGetConfigRequest(dp)
+    msgs = []
+    send_stats_request(dp, stats, waiters, msgs)
+    descs = []
+    for msg in msgs:
+        for stats in msg.body:
+            descs.append({'flags': stats.flags})
+            descs.append({'miss_send_len': stats.miss_send_len})
+    descs = {str(dp.id): descs}
+    return descs
+# -------------------------- Fujitsu code end -------------------------------
 
 def mod_flow_entry(dp, flow, cmd):
     cookie = int(flow.get('cookie', 0))
@@ -864,7 +1001,18 @@ def mod_flow_entry(dp, flow, cmd):
     out_port = int(flow.get('out_port', dp.ofproto.OFPP_ANY))
     out_group = int(flow.get('out_group', dp.ofproto.OFPG_ANY))
     flags = int(flow.get('flags', 0))
-    match = to_match(dp, flow.get('match', {}))
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+#    match = to_match(dp, flow.get('match', {}))
+    match_dic = flow.get('match',{})
+    try:
+        sigid_dic = match_dic.get('odu_sigid')
+        del match_dic['odu_sigid']
+        match_dic.update(sigid_dic)
+    except:
+        pass
+    match = to_match(dp, match_dic)
+# -------------------------- Fujitsu code end -------------------------------
     inst = to_actions(dp, flow.get('actions', []))
 
     flow_mod = dp.ofproto_parser.OFPFlowMod(

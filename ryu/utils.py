@@ -29,6 +29,21 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+#
+# Copyright 2015 FUJITSU LIMITED. 
+# 
+# Licensed under the Apache License, Version 2.0 (the "License"); 
+# you may not use this file except in compliance with the License. 
+# You may obtain a copy of the License at 
+# 
+#   http://www.apache.org/licenses/LICENSE-2.0 
+# 
+# Unless required by applicable law or agreed to in writing, software 
+# distributed under the License is distributed on an "AS IS" BASIS, 
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. 
+# See the License for the specific language governing permissions and 
+# limitations under the License. 
+# 
 
 import inspect
 import logging
@@ -97,11 +112,13 @@ def hex_array(data):
     """Convert string into array of hexes to be printed."""
     return ' '.join(hex(ord(char)) for char in data)
 
-
 def bytearray_to_hex(data):
     """Convert bytearray into array of hexes to be printed."""
-    return ' '.join(hex(ord(byte)) for byte in data)
-
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+#    return ' '.join(hex(ord(byte)) for byte in data)
+    return ' '.join(hex(byte) for byte in data)
+# -------------------------- Fujitsu code end -------------------------------
 
 # the following functions are taken from OpenStack
 #

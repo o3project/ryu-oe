@@ -13,6 +13,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+#
+# Copyright 2015 FUJITSU LIMITED. 
+# 
+# Licensed under the Apache License, Version 2.0 (the "License"); 
+# you may not use this file except in compliance with the License. 
+# You may obtain a copy of the License at 
+# 
+#   http://www.apache.org/licenses/LICENSE-2.0 
+# 
+# Unless required by applicable law or agreed to in writing, software 
+# distributed under the License is distributed on an "AS IS" BASIS, 
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. 
+# See the License for the specific language governing permissions and 
+# limitations under the License. 
+# 
+
 import logging
 
 import json
@@ -36,8 +52,7 @@ LOG = logging.getLogger('ryu.app.ofctl_rest')
 
 # REST API
 #
-
-# Retrieve the switch stats
+## Retrieve the switch stats
 #
 # get the list of all switches
 # GET /stats/switches
@@ -68,8 +83,9 @@ LOG = logging.getLogger('ryu.app.ofctl_rest')
 #
 # get groups stats of the switch
 # GET /stats/group/<dpid>
-
-# Update the switch stats
+#
+#
+## Update the switch stats
 #
 # add a flow entry
 # POST /stats/flowentry/add
@@ -136,7 +152,7 @@ class StatsController(ControllerBase):
         return (Response(content_type='application/json', body=body))
 
     def get_flow_stats(self, req, dpid, **_kwargs):
-        dp = self.dpset.get(int(dpid))
+        dp = self.dpset.get(int(dpid,0))
         if dp is None:
             return Response(status=404)
 
@@ -145,7 +161,11 @@ class StatsController(ControllerBase):
         elif dp.ofproto.OFP_VERSION == ofproto_v1_2.OFP_VERSION:
             flows = ofctl_v1_2.get_flow_stats(dp, self.waiters)
         elif dp.ofproto.OFP_VERSION == ofproto_v1_3.OFP_VERSION:
-            flows = ofctl_v1_3.get_flow_stats(dp, self.waiters)
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+#            flows = ofctl_v1_3.get_flow_stats(dp, self.waiters)
+            flows = ofctl_v1_3.get_flow_stats(dp, self.waiters, match)
+# -------------------------- Fujitsu code end -------------------------------
         else:
             LOG.debug('Unsupported OF protocol')
             return Response(status=501)
@@ -269,7 +289,11 @@ class StatsController(ControllerBase):
             return Response(status=400)
 
         dpid = flow.get('dpid')
-        dp = self.dpset.get(int(dpid))
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+#        dp = self.dpset.get(int(dpid))
+        dp = self.dpset.get(int(dpid,0))
+# -------------------------- Fujitsu code end -------------------------------
         if dp is None:
             return Response(status=404)
 
@@ -400,7 +424,6 @@ class StatsController(ControllerBase):
             return Response(status=501)
 
         return Response(status=200)
-
 
 class RestStatsApi(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_0.OFP_VERSION,

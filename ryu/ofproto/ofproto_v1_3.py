@@ -1,4 +1,4 @@
-# Copyright (C) 2012 Nippon Telegraph and Telephone Corporation.
+﻿# Copyright (C) 2012 Nippon Telegraph and Telephone Corporation.
 # Copyright (C) 2012 Isaku Yamahata <yamahata at valinux co jp>
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,6 +13,22 @@
 # implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+#
+# Copyright 2015 FUJITSU LIMITED. 
+# 
+# Licensed under the Apache License, Version 2.0 (the "License"); 
+# you may not use this file except in compliance with the License. 
+# You may obtain a copy of the License at 
+# 
+#   http://www.apache.org/licenses/LICENSE-2.0 
+# 
+# Unless required by applicable law or agreed to in writing, software 
+# distributed under the License is distributed on an "AS IS" BASIS, 
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. 
+# See the License for the specific language governing permissions and 
+# limitations under the License. 
+# 
 
 from ryu.ofproto import oxm_fields
 
@@ -246,6 +262,16 @@ OFPAT_DEC_NW_TTL = 24           # Decrement IP TTL.
 OFPAT_SET_FIELD = 25            # Set a header field using OXM TLV format.
 OFPAT_PUSH_PBB = 26             # Push a new PBB service tag (I-TAG)
 OFPAT_POP_PBB = 27              # Pop the outer PBB service tag (I-TAG)
+
+
+#Del Start Case1
+"""
+OFPAT_SET_TS = 28
+OFPAT_SET_TPN = 29
+OFPAT_SET_ODU_TYPE = 30
+"""
+#Del End Case1
+
 OFPAT_EXPERIMENTER = 0xffff
 
 # struct ofp_action_header
@@ -299,6 +325,29 @@ assert calcsize(OFP_ACTION_POP_MPLS_PACK_STR) == OFP_ACTION_POP_MPLS_SIZE
 OFP_ACTION_SET_FIELD_PACK_STR = '!HH4x'
 OFP_ACTION_SET_FIELD_SIZE = 8
 assert calcsize(OFP_ACTION_SET_FIELD_PACK_STR) == OFP_ACTION_SET_FIELD_SIZE
+
+#Del Start Case1
+"""
+# ADD START--------
+
+# struct ofp_action_set_ts
+OFP_ACTION_SET_TS_PACK_STR = '!HH32B4x'
+OFP_ACTION_SET_TS_SIZE = 40
+assert calcsize(OFP_ACTION_SET_TS_PACK_STR) == OFP_ACTION_SET_TS_SIZE
+
+# struct ofp_action_set_tpn
+OFP_ACTION_SET_TPN_PACK_STR = '!HHI'
+OFP_ACTION_SET_TPN_SIZE = 8
+assert calcsize(OFP_ACTION_SET_TPN_PACK_STR) == OFP_ACTION_SET_TPN_SIZE
+
+# struct ofp_action_set_odu_type
+OFP_ACTION_SET_ODU_TYPE_PACK_STR = '!HHI'
+OFP_ACTION_SET_ODU_TYPE_SIZE = 8
+assert calcsize(OFP_ACTION_SET_ODU_TYPE_PACK_STR) == OFP_ACTION_SET_ODU_TYPE_SIZE
+
+# ADD END--------
+"""
+#Del End Case1
 
 # struct ofp_action_experimenter_header
 OFP_ACTION_EXPERIMENTER_HEADER_PACK_STR = '!HHI'
@@ -1111,6 +1160,11 @@ assert (calcsize(OFP_HELLO_ELEM_VERSIONBITMAP_HEADER_PACK_STR) ==
 def _oxm_tlv_header(class_, field, hasmask, length):
     return (class_ << 16) | (field << 9) | (hasmask << 8) | length
 
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+OFP_EXPERIMENTERS_OUI = 0xFF000007
+# -------------------------- Fujitsu code end -------------------------------
+
 
 def oxm_tlv_header(field, length):
     return _oxm_tlv_header(OFPXMC_OPENFLOW_BASIC, field, 0, length)
@@ -1119,6 +1173,14 @@ def oxm_tlv_header(field, length):
 def oxm_tlv_header_w(field, length):
     return _oxm_tlv_header(OFPXMC_OPENFLOW_BASIC, field, 1, length * 2)
 
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+def oxm_tlv_header_ex(field, length):
+    return _oxm_tlv_header(OFPXMC_EXPERIMENTER, field - oxm_fields.OFP_EXPERIMENTER_FIELD_CHG, 0, length)
+
+def oxm_tlv_header_ex_w(field, length):
+    return _oxm_tlv_header(OFPXMC_EXPERIMENTER, field - oxm_fields.OFP_EXPERIMENTER_FIELD_CHG, 1, length * 2)
+# -------------------------- Fujitsu code end -------------------------------
 
 def oxm_tlv_header_extract_hasmask(header):
     return (header >> 8) & 1
@@ -1172,11 +1234,34 @@ oxm_types = [
     oxm_fields.OpenFlowBasic('pbb_isid', 37, oxm_fields.Int3),
     oxm_fields.OpenFlowBasic('tunnel_id', 38, oxm_fields.Int8),
     oxm_fields.OpenFlowBasic('ipv6_exthdr', 39, oxm_fields.Int2),
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+
+    #Oxm_field of Experimenter Header is set by converting the format of
+    #the "enum ofp_experimenters_fields".(-38)
+    #When changing the parameter number of Experimenter,
+    #it is also necessary to change the "oxm_fields.OFP_EXPERIMENTER_FIELD_CHG(=38)".
+    oxm_fields.OpenFlowExprtimenter('odu_sigtype', 40, oxm_fields.Int1),
+    oxm_fields.OpenFlowExprtimenter('odu_sigid', 41, oxm_fields.Int14),
+                          #4byte(tpn+reserved+tslen)+10byte(tsmap MAX)
+# -------------------------- Fujitsu code end -------------------------------
     oxm_fields.ONFExperimenter('pbb_uca', 2560, oxm_fields.Int1),
 ]
 
 oxm_fields.generate(__name__)
 
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+OFPODUT_ODU1        = 1
+OFPODUT_ODU2        = 2
+OFPODUT_ODU3        = 3
+OFPODUT_ODU4        = 4
+OFPODUT_ODU0        = 10
+OFPODUT_ODU2E       = 11
+OFPODUT_ODUfCBR     = 20
+OFPODUT_ODUfGFPfHAO = 21
+OFPODUT_ODUfGFPf    = 22
+# -------------------------- Fujitsu code end -------------------------------
 
 # define constants
 OFP_VERSION = 0x04
@@ -1184,3 +1269,12 @@ OFP_TCP_PORT = 6633
 MAX_XID = 0xffffffff
 
 OFP_NO_BUFFER = 0xffffffff
+
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+#enum ofp_experimenters_field
+OFPXMT_EXP_ODU_SIGTYPE = 2
+OFPXMT_EXP_ODU_SIGID   = 3
+OFPXMT_EXP_OCH_SIGTYPE = 4
+OFPXMT_EXP_OCH_SIGID   = 5
+# -------------------------- Fujitsu code end -------------------------------

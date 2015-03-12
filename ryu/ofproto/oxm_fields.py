@@ -1,4 +1,4 @@
-# Copyright (C) 2013 Nippon Telegraph and Telephone Corporation.
+﻿# Copyright (C) 2013 Nippon Telegraph and Telephone Corporation.
 # Copyright (C) 2013 YAMAMOTO Takashi <yamamoto at valinux co jp>
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,6 +13,23 @@
 # implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+#
+# Copyright 2015 FUJITSU LIMITED. 
+# 
+# Licensed under the Apache License, Version 2.0 (the "License"); 
+# you may not use this file except in compliance with the License. 
+# You may obtain a copy of the License at 
+# 
+#   http://www.apache.org/licenses/LICENSE-2.0 
+# 
+# Unless required by applicable law or agreed to in writing, software 
+# distributed under the License is distributed on an "AS IS" BASIS, 
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. 
+# See the License for the specific language governing permissions and 
+# limitations under the License. 
+# 
+
 
 # there are two representations of value and mask this module deal with.
 #
@@ -30,7 +47,10 @@ import ofproto_common
 from ofproto_parser import msg_pack_into
 
 from ryu.lib import addrconv
-
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+import math
+# -------------------------- Fujitsu code end -------------------------------
 
 class TypeDescr(object):
     pass
@@ -55,12 +75,28 @@ class IntDescr(TypeDescr):
             i /= 256
         return bin
 
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+    def to_user_exp(self, bin ,size):
+        i = 0
+        for x in xrange(size):
+            c = bin[:1]
+            i = i * 256 + ord(c)
+            bin = bin[1:]
+        return i
+# -------------------------- Fujitsu code end -------------------------------
+
 Int1 = IntDescr(1)
 Int2 = IntDescr(2)
 Int3 = IntDescr(3)
 Int4 = IntDescr(4)
 Int8 = IntDescr(8)
-
+Int32 = IntDescr(32)
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+Int5 = IntDescr(5)
+Int14 = IntDescr(14)
+# -------------------------- Fujitsu code end -------------------------------
 
 class MacAddr(TypeDescr):
     size = 6
@@ -105,6 +141,13 @@ class OpenFlowBasic(_OxmClass):
         super(OpenFlowBasic, self).__init__(name, num, type_)
         self.num = self.oxm_type
 
+class OpenFlowExprtimenter(object):
+    _class = OFPXMC_EXPERIMENTER
+
+    def __init__(self, name, num, type_):
+        self.name = name
+        self.num = num | (self._class << 7)
+        self.type = type_
 
 class _Experimenter(_OxmClass):
     _class = OFPXMC_EXPERIMENTER
@@ -134,13 +177,20 @@ def generate(modname):
         if isinstance(i.num, tuple):
             continue
         oxm_class = i.num >> 7
-        if oxm_class != OFPXMC_OPENFLOW_BASIC:
+        if oxm_class == OFPXMC_OPENFLOW_BASIC:
+            ofpxmt = i.num & 0x3f
+            td = i.type
+            add_attr('OFPXMT_OFB_' + uk, ofpxmt)
+            add_attr('OXM_OF_' + uk, mod.oxm_tlv_header(ofpxmt, td.size))
+            add_attr('OXM_OF_' + uk + '_W', mod.oxm_tlv_header_w(ofpxmt, td.size))
+        elif oxm_class == OFPXMC_EXPERIMENTER:
+            ofpxmt = i.num & 0x3f
+            td = i.type
+            add_attr('OFPXMT_OFB_' + uk, ofpxmt)
+            add_attr('OXM_OF_' + uk, mod.oxm_tlv_header_ex(ofpxmt, td.size))
+            add_attr('OXM_OF_' + uk + '_W', mod.oxm_tlv_header_ex_w(ofpxmt, td.size))
+        else:
             continue
-        ofpxmt = i.num & 0x3f
-        td = i.type
-        add_attr('OFPXMT_OFB_' + uk, ofpxmt)
-        add_attr('OXM_OF_' + uk, mod.oxm_tlv_header(ofpxmt, td.size))
-        add_attr('OXM_OF_' + uk + '_W', mod.oxm_tlv_header_w(ofpxmt, td.size))
 
     name_to_field = dict((f.name, f) for f in mod.oxm_types)
     num_to_field = dict((f.num, f) for f in mod.oxm_types)
@@ -189,10 +239,22 @@ def to_user(num_to_field, n, v, m):
         name = 'field_%d' % n
     if v is not None:
         if hasattr(t, 'size') and t.size != len(v):
-            raise Exception(
-                'Unexpected OXM payload length %d for %s (expected %d)'
-                % (len(v), name, t.size))
-        value = t.to_user(v)
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+#            raise Exception(
+#                'Unexpected OXM payload length %d for %s (expected %d)'
+#                % (len(v), name, t.size))
+#        value = t.to_user(v)
+            if name == "odu_sigid":
+                value = t.to_user_exp(v, len(v))
+            else:
+                raise Exception(
+                    'Unexpected OXM payload length %d for %s (expected %d)'
+                    % (len(v), name, t.size))
+        else:
+            value = t.to_user(v)
+# -------------------------- Fujitsu code end -------------------------------
+
     else:
         value = None
     if m is None:
@@ -216,6 +278,11 @@ def normalize_user(mod, k, uv):
     return (k2, uv2)
 
 
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+OFP_EXPERIMENTER_FIELD_CHG = 38
+# -------------------------- Fujitsu code end -------------------------------
+
 def parse(mod, buf, offset):
     hdr_pack_str = '!I'
     (header, ) = struct.unpack_from(hdr_pack_str, buf, offset)
@@ -230,16 +297,26 @@ def parse(mod, buf, offset):
                                         offset + hdr_len)
         exp_hdr_len = struct.calcsize(exp_hdr_pack_str)
         if exp_id == ofproto_common.ONF_EXPERIMENTER_ID:
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+            '''
             onf_exp_type_pack_str = '!H'
             (exp_type, ) = struct.unpack_from(onf_exp_type_pack_str, buf,
                                               offset + hdr_len + exp_hdr_len)
             exp_hdr_len += struct.calcsize(onf_exp_type_pack_str)
             num = (ONFExperimenter, exp_type)
+            '''
+            num = oxm_type + OFP_EXPERIMENTER_FIELD_CHG
+# -------------------------- Fujitsu code end -------------------------------
     else:
         num = oxm_type
         exp_hdr_len = 0
     value_offset = offset + hdr_len + exp_hdr_len
-    value_len = len - exp_hdr_len
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+#    value_len = len - exp_hdr_len
+    value_len = len
+# -------------------------- Fujitsu code end -------------------------------
     value_pack_str = '!%ds' % value_len
     assert struct.calcsize(value_pack_str) == value_len
     (value, ) = struct.unpack_from(value_pack_str, buf, value_offset)
@@ -248,7 +325,11 @@ def parse(mod, buf, offset):
                                       value_offset + value_len)
     else:
         mask = None
-    field_len = hdr_len + (header & 0xff)
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+#    field_len = hdr_len + (header & 0xff)
+    field_len = hdr_len + (header & 0xff) + exp_hdr_len
+# -------------------------- Fujitsu code end -------------------------------
     return num, value, mask, field_len
 
 

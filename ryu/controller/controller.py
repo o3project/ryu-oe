@@ -14,6 +14,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+#
+# Copyright 2015 FUJITSU LIMITED. 
+# 
+# Licensed under the Apache License, Version 2.0 (the "License"); 
+# you may not use this file except in compliance with the License. 
+# You may obtain a copy of the License at 
+# 
+#   http://www.apache.org/licenses/LICENSE-2.0 
+# 
+# Unless required by applicable law or agreed to in writing, software 
+# distributed under the License is distributed on an "AS IS" BASIS, 
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. 
+# See the License for the specific language governing permissions and 
+# limitations under the License. 
+# 
+
 import contextlib
 from ryu import cfg
 import logging
@@ -37,6 +53,13 @@ from ryu.controller import ofp_event
 
 from ryu.lib.dpid import dpid_to_str
 
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+import binascii
+import inspect
+import struct
+# -------------------------- Fujitsu code end -------------------------------
+
 LOG = logging.getLogger('ryu.controller.controller')
 
 CONF = cfg.CONF
@@ -48,6 +71,10 @@ CONF.register_cli_opts([
                help='openflow ssl listen port'),
     cfg.StrOpt('ctl-privkey', default=None, help='controller private key'),
     cfg.StrOpt('ctl-cert', default=None, help='controller certificate'),
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+    cfg.StrOpt('dbg-flow-stats-reply-path', default=None, help='debug file path for flow stats reply message'),
+# -------------------------- Fujitsu code end -------------------------------
     cfg.StrOpt('ca-certs', default=None, help='CA certificates')
 ])
 
@@ -117,6 +144,47 @@ class Datapath(ofproto_protocol.ProtocolDesc):
         self.ofp_brick = ryu.base.app_manager.lookup_service_brick('ofp_event')
         self.set_state(handler.HANDSHAKE_DISPATCHER)
 
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+        # make msgtype dictionary
+        self.msgtype_dict = {}
+        msgtype_list = {
+            "OFPT_HELLO",
+            "OFPT_ERROR",
+            "OFPT_ECHO_REQUEST",
+            "OFPT_ECHO_REPLY",
+            "OFPT_EXPERIMENTER",
+            "OFPT_FEATURES_REQUEST",
+            "OFPT_FEATURES_REPLY",
+            "OFPT_GET_CONFIG_REQUEST",
+            "OFPT_GET_CONFIG_REPLY",
+            "OFPT_SET_CONFIG",
+            "OFPT_PACKET_IN",
+            "OFPT_FLOW_REMOVED",
+            "OFPT_PORT_STATUS",
+            "OFPT_PACKET_OUT",
+            "OFPT_FLOW_MOD",
+            "OFPT_GROUP_MOD",
+            "OFPT_PORT_MOD",
+            "OFPT_TABLE_MOD",
+            "OFPT_MULTIPART_REQUEST",
+            "OFPT_MULTIPART_REPLY",
+            "OFPT_BARRIER_REQUEST",
+            "OFPT_BARRIER_REPLY",
+            "OFPT_QUEUE_GET_CONFIG_REQUEST",
+            "OFPT_QUEUE_GET_CONFIG_REPLY",
+            "OFPT_ROLE_REQUEST",
+            "OFPT_ROLE_REPLY",
+            "OFPT_GET_ASYNC_REQUEST",
+            "OFPT_GET_ASYNC_REPLY",
+            "OFPT_SET_ASYNC",
+            "OFPT_METER_MOD"
+        }
+        for msgtype in msgtype_list:
+            if hasattr(self.ofproto, msgtype):
+                self.msgtype_dict[getattr(self.ofproto, msgtype)] = msgtype
+# -------------------------- Fujitsu code end -------------------------------
+
     def close(self):
         self.set_state(handler.DEAD_DISPATCHER)
 
@@ -148,6 +216,34 @@ class Datapath(ofproto_protocol.ProtocolDesc):
                 msg = ofproto_parser.msg(self,
                                          version, msg_type, msg_len, xid, buf)
                 # LOG.debug('queue msg %s cls %s', msg, msg.__class__)
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+                LOG.debug('receive data (dpid=%s) <%s> [%s]', str(self.id),
+                          self.msgtype_dict.setdefault(msg_type, 'unknown(%d)' % msg_type),
+                          binascii.hexlify(buf))
+                # debug mode (replace to flow_stats_reply message for debug)
+                if CONF.dbg_flow_stats_reply_path is not None and isinstance(msg, self.ofproto_parser.OFPFlowStatsReply):
+                    buf_tmp = ''
+                    bin_len = 0
+                    try:
+                        fl = open(CONF.dbg_flow_stats_reply_path)
+                        bin_data = ''
+                        for line in fl:
+                            bin_data += line
+                        bin_len = len(bin_data) // 2
+                        buf_tmp = bytearray()
+                        for i in range(0,bin_len):
+                            buf_tmp.append(struct.pack("B", int(bin_data[i*2:i*2+2],16)))
+                    except:
+                        # not found data file. (default sequence)
+                        LOG.debug("_recv_loop : flow-stats-reply-file(%s) open error.", CONF.dbg_flow_stats_reply_path)
+                    if buf_tmp != '' :
+                        msg = ofproto_parser.msg(self,
+                                             version, msg_type, bin_len, xid, buf_tmp)
+                        LOG.debug('replace receive data(TEST DATA:%s) (dpid=%s) <OFPT_MULTIPART_REPLY> [%s]',
+                             CONF.dbg_flow_stats_reply_path, str(self.id),
+                             binascii.hexlify(buf_tmp))
+# -------------------------- Fujitsu code end -------------------------------
                 if msg:
                     ev = ofp_event.ofp_msg_to_ev(msg)
                     self.ofp_brick.send_event_to_observers(ev, self.state)
@@ -190,6 +286,17 @@ class Datapath(ofproto_protocol.ProtocolDesc):
                 pass
 
     def send(self, buf):
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+        (version, msg_type, msg_len, xid) = ofproto_parser.header(buf)
+        required_len = msg_len
+        if len(buf) < required_len:
+            LOG.debug("send data error unmatch size (required size: %d / buffer size %d)",
+                    required_len, msg_len)
+        LOG.debug("send data (dpid=%s) <%s> [%s]", str(self.id),
+                self.msgtype_dict.setdefault(msg_type, 'unknown(%d)' % msg_type),
+                binascii.hexlify(buf))
+# -------------------------- Fujitsu code end -------------------------------
         if self.send_q:
             self.send_q.put(buf)
 

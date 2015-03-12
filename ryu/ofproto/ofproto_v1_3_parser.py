@@ -1,4 +1,4 @@
-# Copyright (C) 2012 Nippon Telegraph and Telephone Corporation.
+﻿# Copyright (C) 2012 Nippon Telegraph and Telephone Corporation.
 # Copyright (C) 2012, 2013 Isaku Yamahata <yamahata at valinux co jp>
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,6 +13,22 @@
 # implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+#
+# Copyright 2015 FUJITSU LIMITED. 
+# 
+# Licensed under the Apache License, Version 2.0 (the "License"); 
+# you may not use this file except in compliance with the License. 
+# You may obtain a copy of the License at 
+# 
+#   http://www.apache.org/licenses/LICENSE-2.0 
+# 
+# Unless required by applicable law or agreed to in writing, software 
+# distributed under the License is distributed on an "AS IS" BASIS, 
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. 
+# See the License for the specific language governing permissions and 
+# limitations under the License. 
+# 
 
 """
 This module implements OpenFlow 1.3.x.
@@ -42,6 +58,11 @@ The following extensions are not implemented yet.
 
 import struct
 import itertools
+import ctypes
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+import math
+# -------------------------- Fujitsu code end -------------------------------
 
 from ryu.lib import addrconv
 from ryu.lib import mac
@@ -51,6 +72,10 @@ from . import ether
 from . import ofproto_parser
 from . import ofproto_common
 from . import ofproto_v1_3 as ofproto
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+from . import oxm_fields
+# -------------------------- Fujitsu code end -------------------------------
 
 import logging
 LOG = logging.getLogger('ryu.ofproto.ofproto_v1_3_parser')
@@ -641,6 +666,13 @@ class Flow(object):
         self.pbb_isid = 0
         self.tunnel_id = 0
         self.ipv6_exthdr = 0
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+        self.ts = [0]*10
+        self.tpn = 0
+        self.odu_type = 0
+        self.tslen = 0
+# -------------------------- Fujitsu code end -------------------------------
 
 
 class FlowWildcards(object):
@@ -902,6 +934,8 @@ class OFPMatch(StringifyMixin):
         OXM_OF_PBB_ISID        PBB I-SID
         OXM_OF_TUNNEL_ID       Logical Port Metadata
         OXM_OF_IPV6_EXTHDR     IPv6 Extension Header pseudo-field
+        OXM_OF_ODU_SIGID       ODU SigID
+        OXM_OF_ODU_SIGTYPE     ODU SigType
         ====================== ===================================
         """
         self.fields.append(OFPMatchField.make(header, value, mask))
@@ -1159,6 +1193,32 @@ class OFPMatch(StringifyMixin):
             self.append_field(header, self._flow.ipv6_exthdr,
                               self._wc.ipv6_exthdr_mask)
 
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_ODU_SIGTYPE):
+            odu_sigtype = []
+            odu_sigtype.append(ofproto.OFP_EXPERIMENTERS_OUI)
+            odu_sigtype.append(self._flow.odu_type)
+
+            self.append_field(ofproto.OXM_OF_ODU_SIGTYPE,
+                              odu_sigtype)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_ODU_SIGID):
+            odu_sigid = []
+            odu_sigid.append(ofproto.OFP_EXPERIMENTERS_OUI)
+            tpn_tslen = self._flow.tpn << (8 + 12)
+            tpn_tslen |= self._flow.tslen
+            odu_sigid.append(tpn_tslen)
+            ts_cnt = math.ceil(self._flow.tslen / 8)
+            for i in self._flow.ts:
+                ts_cnt -= 1
+                odu_sigid.append(i)
+                if ts_cnt == 0:
+                    break
+
+            self.append_field(ofproto.OXM_OF_ODU_SIGID,
+                              odu_sigid)
+# -------------------------- Fujitsu code end -------------------------------
         field_offset = offset + 4
         for f in self.fields:
             f.serialize(buf, field_offset)
@@ -1171,6 +1231,264 @@ class OFPMatch(StringifyMixin):
         ofproto_parser.msg_pack_into("%dx" % pad_len, buf, field_offset)
 
         return length + pad_len
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+    def serialize_act(self, buf, offset):
+        if hasattr(self, '_serialized'):
+            raise Exception('serializing an OFPMatch composed with '
+                            'old API multiple times is not supported')
+        self._serialized = True
+
+        """
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_IN_PORT):
+            self.append_field(ofproto.OXM_OF_IN_PORT,
+                              self._flow.in_port)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_IN_PHY_PORT):
+            self.append_field(ofproto.OXM_OF_IN_PHY_PORT,
+                              self._flow.in_phy_port)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_METADATA):
+            if self._wc.metadata_mask == UINT64_MAX:
+                header = ofproto.OXM_OF_METADATA
+            else:
+                header = ofproto.OXM_OF_METADATA_W
+            self.append_field(header, self._flow.metadata,
+                              self._wc.metadata_mask)
+        """
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_ETH_DST):
+            if self._wc.dl_dst_mask:
+                header = ofproto.OXM_OF_ETH_DST_W
+            else:
+                header = ofproto.OXM_OF_ETH_DST
+            self.append_field(header, self._flow.dl_dst, self._wc.dl_dst_mask)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_ETH_SRC):
+            if self._wc.dl_src_mask:
+                header = ofproto.OXM_OF_ETH_SRC_W
+            else:
+                header = ofproto.OXM_OF_ETH_SRC
+            self.append_field(header, self._flow.dl_src, self._wc.dl_src_mask)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_ETH_TYPE):
+            self.append_field(ofproto.OXM_OF_ETH_TYPE, self._flow.dl_type)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_VLAN_VID):
+            if self._wc.vlan_vid_mask == UINT16_MAX:
+                header = ofproto.OXM_OF_VLAN_VID
+            else:
+                header = ofproto.OXM_OF_VLAN_VID_W
+            self.append_field(header, self._flow.vlan_vid,
+                              self._wc.vlan_vid_mask)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_VLAN_PCP):
+            self.append_field(ofproto.OXM_OF_VLAN_PCP,
+                              self._flow.vlan_pcp)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_IP_DSCP):
+            self.append_field(ofproto.OXM_OF_IP_DSCP, self._flow.ip_dscp)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_IP_ECN):
+            self.append_field(ofproto.OXM_OF_IP_ECN, self._flow.ip_ecn)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_IP_PROTO):
+            self.append_field(ofproto.OXM_OF_IP_PROTO,
+                              self._flow.ip_proto)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_IPV4_SRC):
+            if self._wc.ipv4_src_mask == UINT32_MAX:
+                header = ofproto.OXM_OF_IPV4_SRC
+            else:
+                header = ofproto.OXM_OF_IPV4_SRC_W
+            self.append_field(header, self._flow.ipv4_src,
+                              self._wc.ipv4_src_mask)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_IPV4_DST):
+            if self._wc.ipv4_dst_mask == UINT32_MAX:
+                header = ofproto.OXM_OF_IPV4_DST
+            else:
+                header = ofproto.OXM_OF_IPV4_DST_W
+            self.append_field(header, self._flow.ipv4_dst,
+                              self._wc.ipv4_dst_mask)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_TCP_SRC):
+            self.append_field(ofproto.OXM_OF_TCP_SRC, self._flow.tcp_src)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_TCP_DST):
+            self.append_field(ofproto.OXM_OF_TCP_DST, self._flow.tcp_dst)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_UDP_SRC):
+            self.append_field(ofproto.OXM_OF_UDP_SRC, self._flow.udp_src)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_UDP_DST):
+            self.append_field(ofproto.OXM_OF_UDP_DST, self._flow.udp_dst)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_SCTP_SRC):
+            self.append_field(ofproto.OXM_OF_SCTP_SRC,
+                              self._flow.sctp_src)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_SCTP_DST):
+            self.append_field(ofproto.OXM_OF_SCTP_DST,
+                              self._flow.sctp_dst)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_ICMPV4_TYPE):
+            self.append_field(ofproto.OXM_OF_ICMPV4_TYPE,
+                              self._flow.icmpv4_type)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_ICMPV4_CODE):
+            self.append_field(ofproto.OXM_OF_ICMPV4_CODE,
+                              self._flow.icmpv4_code)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_ARP_OP):
+            self.append_field(ofproto.OXM_OF_ARP_OP, self._flow.arp_op)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_ARP_SPA):
+            if self._wc.arp_spa_mask == UINT32_MAX:
+                header = ofproto.OXM_OF_ARP_SPA
+            else:
+                header = ofproto.OXM_OF_ARP_SPA_W
+            self.append_field(header, self._flow.arp_spa,
+                              self._wc.arp_spa_mask)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_ARP_TPA):
+            if self._wc.arp_tpa_mask == UINT32_MAX:
+                header = ofproto.OXM_OF_ARP_TPA
+            else:
+                header = ofproto.OXM_OF_ARP_TPA_W
+            self.append_field(header, self._flow.arp_tpa,
+                              self._wc.arp_tpa_mask)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_ARP_SHA):
+            if self._wc.arp_sha_mask:
+                header = ofproto.OXM_OF_ARP_SHA_W
+            else:
+                header = ofproto.OXM_OF_ARP_SHA
+            self.append_field(header, self._flow.arp_sha,
+                              self._wc.arp_sha_mask)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_ARP_THA):
+            if self._wc.arp_tha_mask:
+                header = ofproto.OXM_OF_ARP_THA_W
+            else:
+                header = ofproto.OXM_OF_ARP_THA
+            self.append_field(header, self._flow.arp_tha,
+                              self._wc.arp_tha_mask)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_IPV6_SRC):
+            if len(self._wc.ipv6_src_mask):
+                header = ofproto.OXM_OF_IPV6_SRC_W
+            else:
+                header = ofproto.OXM_OF_IPV6_SRC
+            self.append_field(header, self._flow.ipv6_src,
+                              self._wc.ipv6_src_mask)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_IPV6_DST):
+            if len(self._wc.ipv6_dst_mask):
+                header = ofproto.OXM_OF_IPV6_DST_W
+            else:
+                header = ofproto.OXM_OF_IPV6_DST
+            self.append_field(header, self._flow.ipv6_dst,
+                              self._wc.ipv6_dst_mask)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_IPV6_FLABEL):
+            if self._wc.ipv6_flabel_mask == UINT32_MAX:
+                header = ofproto.OXM_OF_IPV6_FLABEL
+            else:
+                header = ofproto.OXM_OF_IPV6_FLABEL_W
+            self.append_field(header, self._flow.ipv6_flabel,
+                              self._wc.ipv6_flabel_mask)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_ICMPV6_TYPE):
+            self.append_field(ofproto.OXM_OF_ICMPV6_TYPE,
+                              self._flow.icmpv6_type)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_ICMPV6_CODE):
+            self.append_field(ofproto.OXM_OF_ICMPV6_CODE,
+                              self._flow.icmpv6_code)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_IPV6_ND_TARGET):
+            self.append_field(ofproto.OXM_OF_IPV6_ND_TARGET,
+                              self._flow.ipv6_nd_target)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_IPV6_ND_SLL):
+            self.append_field(ofproto.OXM_OF_IPV6_ND_SLL,
+                              self._flow.ipv6_nd_sll)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_IPV6_ND_TLL):
+            self.append_field(ofproto.OXM_OF_IPV6_ND_TLL,
+                              self._flow.ipv6_nd_tll)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_MPLS_LABEL):
+            self.append_field(ofproto.OXM_OF_MPLS_LABEL,
+                              self._flow.mpls_label)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_MPLS_TC):
+            self.append_field(ofproto.OXM_OF_MPLS_TC,
+                              self._flow.mpls_tc)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_MPLS_BOS):
+            self.append_field(ofproto.OXM_OF_MPLS_BOS,
+                              self._flow.mpls_bos)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_PBB_ISID):
+            if self._wc.pbb_isid_mask:
+                header = ofproto.OXM_OF_PBB_ISID_W
+            else:
+                header = ofproto.OXM_OF_PBB_ISID
+            self.append_field(header, self._flow.pbb_isid,
+                              self._wc.pbb_isid_mask)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_TUNNEL_ID):
+            if self._wc.tunnel_id_mask:
+                header = ofproto.OXM_OF_TUNNEL_ID_W
+            else:
+                header = ofproto.OXM_OF_TUNNEL_ID
+            self.append_field(header, self._flow.tunnel_id,
+                              self._wc.tunnel_id_mask)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_IPV6_EXTHDR):
+            if self._wc.ipv6_exthdr_mask:
+                header = ofproto.OXM_OF_IPV6_EXTHDR_W
+            else:
+                header = ofproto.OXM_OF_IPV6_EXTHDR
+            self.append_field(header, self._flow.ipv6_exthdr,
+                              self._wc.ipv6_exthdr_mask)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_ODU_SIGTYPE):
+            odu_sigtype = []
+            odu_sigtype.append(ofproto.OFP_EXPERIMENTERS_OUI)
+            odu_sigtype.append(self._flow.odu_type)
+
+            self.append_field(ofproto.OXM_OF_ODU_SIGTYPE,
+                              odu_sigtype)
+
+        if self._wc.ft_test(ofproto.OFPXMT_OFB_ODU_SIGID):
+            odu_sigid = []
+            odu_sigid.append(ofproto.OFP_EXPERIMENTERS_OUI)
+            tpn_tslen = self._flow.tpn << (8 + 12)
+            tpn_tslen |= self._flow.tslen
+            odu_sigid.append(tpn_tslen)
+            ts_cnt = math.ceil(self._flow.tslen / 8)
+            for i in self._flow.ts:
+                ts_cnt -= 1
+                odu_sigid.append(i)
+                if ts_cnt == 0:
+                    break
+
+            self.append_field(ofproto.OXM_OF_ODU_SIGID,
+                              odu_sigid)
+
+        field_offset = offset
+        for f in self.fields:
+            f.serialize(buf, field_offset)
+            field_offset += f.length
+
+        length = field_offset - offset
+
+        return length
+# -------------------------- Fujitsu code end -------------------------------
+
 
     @classmethod
     def parser(cls, buf, offset):
@@ -1443,6 +1761,55 @@ class OFPMatch(StringifyMixin):
         self._wc.ipv6_exthdr_mask = mask
         self._flow.ipv6_exthdr = hdr
 
+    def set_tpn(self, tpn):
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+        self._wc.ft_set(ofproto.OFPXMT_OFB_ODU_SIGID)
+        self._flow.tpn = int(tpn)
+
+    def set_tslen(self, tslen):
+        self._wc.ft_set(ofproto.OFPXMT_OFB_ODU_SIGID)
+        print "Match TS Length"
+        print tslen
+        self._flow.tslen = int(tslen)
+
+    def set_ts(self, ts):
+        self._wc.ft_set(ofproto.OFPXMT_OFB_ODU_SIGID)
+        self.ts_sp = ts.split(',')
+        for i in range(len(self.ts_sp)):
+            if (0 == int(self.ts_sp[i])):
+                continue
+            s = ((int(self.ts_sp[i]) - 1) // 8)
+            a = 7-((int(self.ts_sp[i]) - 1) % 8)
+            t = 1 << a
+            self._flow.ts[s] = self._flow.ts[s] | t
+
+    def set_odu_type(self, odu_type):
+        self._wc.ft_set(ofproto.OFPXMT_OFB_ODU_SIGTYPE)
+        print "Match ODU_TYPE"
+        print odu_type
+        if odu_type == 'ODU0':
+            self._flow.odu_type = ofproto.OFPODUT_ODU0
+        elif odu_type == 'ODU1':
+            self._flow.odu_type  = ofproto.OFPODUT_ODU1
+        elif odu_type == 'ODU2':
+            self._flow.odu_type = ofproto.OFPODUT_ODU2
+        elif odu_type == 'ODU3':
+            self._flow.odu_type = ofproto.OFPODUT_ODU3
+        elif odu_type == 'ODU4':
+            self._flow.odu_type = ofproto.OFPODUT_ODU4
+        elif odu_type == 'ODU2E':
+            self._flow.odu_type = ofproto.OFPODUT_ODU2E
+        elif odu_type == 'ODUfCBR':
+            self._flow.odu_type = ofproto.OFPODUT_ODUfCBR
+        elif odu_type == 'ODUfGFPfHAO':
+            self._flow.odu_type = ofproto.OFPODUT_ODUfGFPfHAO
+        elif odu_type == 'ODUfGFPf':
+            self._flow.odu_type = ofproto.OFPODUT_ODUfGFPf
+        else:
+            raise Exception('set_odu_type ODU Type Error %s' % odu_type)
+# -------------------------- Fujitsu code end -------------------------------
+
 
 class OFPMatchField(StringifyMixin):
     _FIELDS_HEADERS = {}
@@ -1451,7 +1818,11 @@ class OFPMatchField(StringifyMixin):
     def register_field_header(headers):
         def _register_field_header(cls):
             for header in headers:
-                OFPMatchField._FIELDS_HEADERS[header] = cls
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+#                OFPMatchField._FIELDS_HEADERS[header] = cls
+                OFPMatchField._FIELDS_HEADERS[header >> 8] = cls
+# -------------------------- Fujitsu code end -------------------------------
             return cls
         return _register_field_header
 
@@ -1469,18 +1840,34 @@ class OFPMatchField(StringifyMixin):
 
     @staticmethod
     def make(header, value, mask=None):
-        cls_ = OFPMatchField._FIELDS_HEADERS.get(header)
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+#        cls_ = OFPMatchField._FIELDS_HEADERS.get(header)
+        cls_ = OFPMatchField._FIELDS_HEADERS.get(header>>8)
+# -------------------------- Fujitsu code end -------------------------------
         return cls_(header, value, mask)
 
     @classmethod
     def parser(cls, buf, offset):
         (header,) = struct.unpack_from('!I', buf, offset)
-        cls_ = OFPMatchField._FIELDS_HEADERS.get(header)
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+#        cls_ = OFPMatchField._FIELDS_HEADERS.get(header)
+        cls_ = OFPMatchField._FIELDS_HEADERS.get(header >> 8)
+# -------------------------- Fujitsu code end -------------------------------
         if cls_:
             field = cls_.field_parser(header, buf, offset)
         else:
             field = OFPMatchField(header)
-        field.length = (header & 0xff) + 4
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+#        field.length = (header & 0xff) + 4
+        oxm_class = (header & 0xffff0000) >> 16
+        if oxm_class == oxm_fields.OFPXMC_EXPERIMENTER:
+            field.length = (header & 0xff) + 4 + 4
+        else:
+            field.length = (header & 0xff) + 4
+# -------------------------- Fujitsu code end -------------------------------
         return field
 
     @classmethod
@@ -1505,6 +1892,7 @@ class OFPMatchField(StringifyMixin):
         self.length = 4
 
     def _put(self, buf, offset, value):
+        #ofproto_parser.msg_pack_into(self.pack_str, buf, offset, int32_to_uint32(value))
         ofproto_parser.msg_pack_into(self.pack_str, buf, offset, value)
         self.length += self.n_bytes
 
@@ -2000,6 +2388,113 @@ class MTIPv6ExtHdr(OFPMatchField):
         super(MTIPv6ExtHdr, self).__init__(header)
         self.value = value
         self.mask = mask
+
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+@OFPMatchField.register_field_header([ofproto.OXM_OF_ODU_SIGID])
+class MTOduSigid(OFPMatchField):
+    pack_str = '!II'
+
+    def __init__(self, header, value, mask=None):
+        if isinstance(value, list) :
+            self.tslen = value[1] & 0x00000FFF
+            self.ts_size = int(math.ceil(self.tslen / 8))
+            self.odu_sigid_size = 4 + self.ts_size
+
+        super(MTOduSigid, self).__init__(header)
+        self.value = value
+
+    def _put_header(self, buf, offset):
+        header = ofproto.oxm_tlv_header_ex(ofproto.OFPXMT_OFB_ODU_SIGID,self.odu_sigid_size)
+        ofproto_parser.msg_pack_into('!I', buf, offset, header)
+        self.length = 4
+
+    def _put(self, buf, offset, value):
+        if self.ts_size > 1:
+            pack_str_tmp = self.pack_str + str(self.ts_size) + 'B'
+        else:
+            pack_str_tmp = self.pack_str + 'B'
+
+        ofproto_parser.msg_pack_into(pack_str_tmp, buf, offset,
+                                     *value)
+
+        self.length += self.odu_sigid_size + 4#Experimenter ID Size
+
+    @classmethod
+    def field_parser(cls, header, buf, offset):
+        pack_str = '!II'
+        #pack_str = '!ii'
+        ts_size = (header & 0x000000FF) - 4
+        mask = 0
+        if ts_size > 1:
+            pack_str_tmp = pack_str + str(ts_size) + 'B'
+        else:
+            pack_str_tmp = pack_str + 'B'
+
+        (exp,value,ts) = struct.unpack_from(pack_str_tmp, buf, offset + 4)
+        odu_sigid = {}
+        tpn = str(value >> 20)
+        odu_sigid.update({'tpn':tpn})
+
+        tslen = str(value & 0x00000FFF)
+        odu_sigid.update({'tslen':tslen})
+
+        shift = int(tslen) - 1
+        tsmap = ""
+        for i in range(1,int(tslen)+1):
+            tmp = ts >> shift
+            if tmp == 1: 
+                if i == int(tslen):
+                    tsmap = tsmap + str(i)
+                else:
+                    tsmap = tsmap + str(i) + ","
+            ts = ts & ~(1 << shift)
+            shift -= 1
+        odu_sigid.update({'tsmap':tsmap})
+
+        return cls(header, odu_sigid, mask)
+
+@OFPMatchField.register_field_header([ofproto.OXM_OF_ODU_SIGTYPE])
+class MTOduSigtype(OFPMatchField):
+    pack_str = '!IB'
+
+    def __init__(self, header, value, mask=None):
+        super(MTOduSigtype, self).__init__(header)
+        self.value = value
+
+    def _put(self, buf, offset, value):
+        ofproto_parser.msg_pack_into(self.pack_str, buf, offset,
+                                     *value)
+        self.length += self.n_bytes + 4#Experimenter ID Size
+
+    @classmethod
+    def field_parser(cls, header, buf, offset):
+        mask = 0
+        (exp,value,) = struct.unpack_from(cls.pack_str, buf, offset + 4)
+        if value == ofproto.OFPODUT_ODU0:
+            odu_type = 'ODU0'
+        elif value == ofproto.OFPODUT_ODU1:
+            odu_type  = 'ODU1'
+        elif value == ofproto.OFPODUT_ODU2:
+            odu_type = 'ODU2'
+        elif value == ofproto.OFPODUT_ODU3:
+            odu_type = 'ODU3'
+        elif value == ofproto.OFPODUT_ODU4:
+            odu_type = 'ODU4'
+        elif value == ofproto.OFPODUT_ODU2E:
+            odu_type = 'ODU2E'
+        elif value == ofproto.OFPODUT_ODUfCBR:
+            odu_type = 'ODUfCBR'
+        elif value == ofproto.OFPODUT_ODUfGFPfHAO:
+            odu_type = 'ODUfGFPfHAO'
+        elif value == ofproto.OFPODUT_ODUfGFPf:
+            odu_type = 'ODUfGFPf'
+        else:
+            LOG.debug('field_parser ODU Type Error %d', value)
+            odu_type = ''
+
+        return cls(header, odu_type, mask)
+# -------------------------- Fujitsu code end -------------------------------
 
 
 @_register_parser
@@ -2987,6 +3482,12 @@ class OFPActionSetField(OFPAction):
             # old api compat
             assert len(kwargs) == 0
             self.field = field
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+        elif isinstance(field, OFPMatch):
+            assert len(kwargs) == 0
+            self.field = field
+# -------------------------- Fujitsu code end -------------------------------
         else:
             # new api
             assert len(kwargs) == 1
@@ -2996,6 +3497,7 @@ class OFPActionSetField(OFPAction):
             assert not isinstance(value, tuple)  # no mask
             self.key = key
             self.value = value
+
 
     @classmethod
     def parser(cls, buf, offset):
@@ -3025,6 +3527,9 @@ class OFPActionSetField(OFPAction):
 
     # XXX old api compat
     def serialize_old(self, buf, offset):
+# -------------------------- Fujitsu code start -----------------------------
+# For optical enhancing
+        """
         len_ = ofproto.OFP_ACTION_SET_FIELD_SIZE + self.field.oxm_len()
         self.len = utils.round_up(len_, 8)
         pad_len = self.len - len_
@@ -3033,6 +3538,15 @@ class OFPActionSetField(OFPAction):
         self.field.serialize(buf, offset + 4)
         offset += len_
         ofproto_parser.msg_pack_into("%dx" % pad_len, buf, offset)
+        """
+        datalen = self.field.serialize_act(buf, offset + 4)
+        len_ = datalen + 4
+        self.len = utils.round_up(len_, 8)
+        msg_pack_into('!HH', buf, offset, self.type, self.len)
+        pad_len = self.len - len_
+        offset += len_
+        ofproto_parser.msg_pack_into("%dx" % pad_len, buf, offset)
+# -------------------------- Fujitsu code end -------------------------------
 
     # XXX old api compat
     def _composed_with_old_api(self):
@@ -3084,7 +3598,6 @@ class OFPActionSetField(OFPAction):
 
     def stringify_attrs(self):
         yield (self.key, self.value)
-
 
 @OFPAction.register_action_type(ofproto.OFPAT_PUSH_PBB,
                                 ofproto.OFP_ACTION_PUSH_SIZE)
@@ -5906,3 +6419,6 @@ class OFPSetAsync(MsgBase):
                       self.packet_in_mask[0], self.packet_in_mask[1],
                       self.port_status_mask[0], self.port_status_mask[1],
                       self.flow_removed_mask[0], self.flow_removed_mask[1])
+
+def int32_to_uint32(i):
+    return ctypes.c_uint32(i).value
