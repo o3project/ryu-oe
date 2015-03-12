@@ -1,9 +1,8 @@
 # What's RYU-OE
 "Opt-transport apps of O3 orchestrator&amp;controller suite"
 ---
-RYU-OE(RYU OTN Extension) is an OpenFlow Controller which can support OTN(Optical Transport Network). New OTN parameters are added in Match Fields of OpenFlow Protocol ver1.3.
-The detail of the extended OpenFlow specification is to be published by ONF in near future.
-
+RYU-OE is based on RYU V3.9 developed by NTT.  
+In RYU-OE, some OTN parameters are added to the Match Fields of OpenFlow protocol (ver1.3) to support OTN. The detail of the extended OpenFlow specification is to be published by ONF in near future.　
 
  Build
 --------------------------
