@@ -9,7 +9,8 @@ In RYU-OE, some OTN parameters are added to the Match Fields of OpenFlow protoco
 
     $ cd ~
     $ git clone https://github.com/o3project/ryu-oe.git
-    $ sudo python ~/ryu-oe/setup.py install
+    $ cd ~/ryu-oe
+    $ sudo python ./setup.py install
 
 
  Starting RYU-OE
